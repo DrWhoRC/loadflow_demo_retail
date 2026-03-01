@@ -1,3 +1,4 @@
+- [Clicl here for English version README.md](README_EN.md)
 # LoadFlow Retail Demo — 电商数据管线全场景演示
 
 > 基于 [LoadFlow](https://github.com/DrWhoRC/loadflow) 框架构建的真实场景 Demo，使用 Kaggle [Online Retail II](https://www.kaggle.com/datasets/mashlyn/online-retail-ii-uci) 数据集（~107 万行），将 CSV 数据经过三条差异化 Stream 写入 MySQL，完整展示 **WRR 加权轮询**、**粘性路由**、**StripedPool 强有序**三种策略，以及 **pressure\_rebalance 动态重均衡**机制。全程通过 Prometheus + Grafana 实时可视化。
