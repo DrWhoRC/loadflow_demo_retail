@@ -1,0 +1,124 @@
+# LoadFlow Demo - Retail Data Pipeline Configuration
+# 使用 Kaggle Online Retail II 数据集，MySQL 作为消费端
+# 测试三种策略 + pressure_rebalance 动态重均衡
+
+# ==================================================================
+# Demo 运行参数
+# ==================================================================
+demo:
+  csv_path: "online_retail_II.csv"
+  max_rows: 50000           # 限制读取行数（0=全部，建议先用 50000 调试）
+  metrics_port: 2112        # Prometheus metrics 端口
+  run_duration: 180s        # 总运行时间 3 分钟（让重均衡有足够迭代）
+  handler_latency: 15ms     # 模拟真实 I/O 延迟（让 worker 数量成为瓶颈，触发 rebalance）
+
+# ==================================================================
+# MySQL 数据库配置
+# ==================================================================
+database:
+  # 三个 pool 连向同一个 MySQL 实例，但使用不同大小的连接池来制造处理能力差异
+  dsn: "root:wpywatsendw0517@tcp(127.0.0.1:3306)/loadflow_demo?charset=utf8mb4&parseTime=True&loc=Local"
+  
+  # 每个 pool 的连接池大小（这是制造压力差的关键！）
+  pool_fast:
+    max_open_conns: 20
+    max_idle_conns: 10
+  pool_medium:
+    max_open_conns: 5
+    max_idle_conns: 3
+  pool_slow:
+    max_open_conns: 2
+    max_idle_conns: 1
+
+# ==================================================================
+# 协程池配置
+# ==================================================================
+pools:
+  - name: pool_fast
+    workers: 8
+    queue: 2048
+
+  - name: pool_medium
+    workers: 4
+    queue: 1024
+
+  - name: pool_slow
+    workers: 2
+    queue: 512
+
+# ==================================================================
+# 数据流配置
+# ==================================================================
+streams:
+  # Stream 1: 纯消费（商品目录批量导入）
+  # 无 key，WRR 权重分发，把 80% 流量压给 pool_slow 来触发重均衡
+  stream_products:
+    type: pure_consumption
+    rate: 300                 # rows/s — 略超总处理能力
+    key_enabled: false
+
+  # Stream 2: 粘性路由（客户交易聚合）
+  # 以 CustomerID 为 key
+  stream_customers:
+    type: sticky
+    rate: 200                 # rows/s
+    key_enabled: true
+
+  # Stream 3: 强有序（订单状态机）
+  # 以 InvoiceNo 为 key，使用 StripedPool
+  # 不走 Runtime 管线，独立运行
+  stream_orders:
+    type: strongly_ordered
+    rate: 100                 # orders/s
+    stripe_count: 8           # StripedPool 分片数
+    stripe_queue_size: 256    # 每个分片队列大小
+
+# ==================================================================
+# 路由配置（Stream 1 & 2 使用）
+# ==================================================================
+routing:
+  stream_products:
+    pools: [pool_fast, pool_medium, pool_slow]
+    initial_weights: [1, 1, 8]    # 故意不均衡：80% 流量给最慢的 pool
+
+  stream_customers:
+    pools: [pool_fast, pool_medium, pool_slow]
+    initial_weights: [1, 1, 8]    # 同样不均衡，让 rebalance + sticky violation 可观
+
+# ==================================================================
+# Scheduler 配置
+# ==================================================================
+scheduler:
+  tick: 1s                        # 采样间隔
+  default_cooldown: 10s
+
+  policies:
+    # Stream 1: 启用重均衡 — 展示 pressure_rebalance 完整过程
+    stream_products:
+      enabled: true
+      strategy: pressure_rebalance
+      cooldown: 3s
+      params:
+        minPressureDelta: 3.0
+        baseStep: 1.0
+        maxStep: 2.0
+        minWeight: 1.0
+        maxFrac: 0.2
+        paceRate: 3.0
+
+    # Stream 2: 也启用重均衡 — 展示 sticky + rebalance 的 trade-off
+    stream_customers:
+      enabled: true
+      strategy: pressure_rebalance
+      cooldown: 5s
+      params:
+        minPressureDelta: 3.0
+        baseStep: 1.0
+        maxStep: 1.0
+        minWeight: 1.0
+        maxFrac: 0.15
+        paceRate: 5.0
+
+    # Stream 3: 不启用（StripedPool 独立运行，保序优先）
+    stream_orders:
+      enabled: false

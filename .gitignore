@@ -1,0 +1,29 @@
+# Dataset
+online_retail_II.csv
+
+# Source code reference doc
+LOADFLOW_SOURCE_CODE_REFERENCE.md
+
+# Go binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+demo
+
+# Go test
+*.test
+*.out
+*.prof
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
